@@ -4,8 +4,9 @@
 // FIREBASE AUTHENTICATION + FIRESTORE
 // =====================================
 
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+// FIREBASE IMPORTS
 
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import {
     getAuth,
     createUserWithEmailAndPassword,
@@ -22,6 +23,7 @@ import {
     setDoc,
     serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+
 
 // =====================================
 // FIREBASE CONFIGURATION
@@ -41,16 +43,12 @@ const firebaseApp = initializeApp(firebaseConfig);
 const auth = getAuth(firebaseApp);
 const db = getFirestore(firebaseApp);
 
+
 // =====================================
 // DEFAULT SETTINGS
 // =====================================
 
 const DEFAULT_GOAL = 2000;
-
-let currentUser = null;
-let pendingName = "";
-let saveQueue = Promise.resolve();
-let isLoadingUserData = false;
 
 const messages = [
     "Water is essential for maintaining normal body functions.",
@@ -119,17 +117,26 @@ const achievements = [
     { percent: 100, name: "Goal Achiever", icon: "🏆" }
 ];
 
+
 // =====================================
-// DEFAULT USER DATA
+// APPLICATION VARIABLES
+// =====================================
+
+let currentUser = null;
+let pendingName = "";
+let isLoadingUserData = false;
+let saveQueue = Promise.resolve();
+let authLoadToken = 0;
+
+let data = createDefaultData();
+
+
+// =====================================
+// DATA MANAGEMENT
 // =====================================
 
 function todayString() {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, "0");
-    const day = String(now.getDate()).padStart(2, "0");
-
-    return `${year}-${month}-${day}`;
+    return new Date().toLocaleDateString("en-CA");
 }
 
 function createDefaultData() {
@@ -149,113 +156,6 @@ function createDefaultData() {
     };
 }
 
-let data = createDefaultData();
-
-// =====================================
-// FIRESTORE USER DATA
-// =====================================
-
-function getUserDocument() {
-    if (!currentUser) return null;
-
-    return doc(db, "users", currentUser.uid);
-}
-
-async function loadUserData(user) {
-    isLoadingUserData = true;
-
-    try {
-        const userRef = doc(db, "users", user.uid);
-        const snapshot = await getDoc(userRef);
-
-        const defaultData = createDefaultData();
-
-        if (snapshot.exists()) {
-            const savedData = snapshot.data();
-
-            data = {
-                ...defaultData,
-                ...savedData,
-                email: user.email || "",
-                name: user.displayName ||
-                    savedData.name ||
-                    user.email.split("@")[0],
-                history: Array.isArray(savedData.history)
-                    ? savedData.history
-                    : []
-            };
-
-            // Reset daily records when a new day begins.
-            if (data.date !== todayString()) {
-                data.date = todayString();
-                data.total = 0;
-                data.history = [];
-            }
-
-        } else {
-            data = {
-                ...defaultData,
-                email: user.email || "",
-                name: user.displayName ||
-                    pendingName ||
-                    user.email.split("@")[0]
-            };
-        }
-
-        data.name = user.displayName || pendingName || data.name;
-
-        await saveUserDataImmediately();
-
-        loadSettings();
-        showApplication();
-
-    } catch (error) {
-        console.error("Error loading user data:", error);
-
-        showToast("Unable to load your data. Please try again.");
-
-    } finally {
-        isLoadingUserData = false;
-    }
-}
-
-async function saveUserDataImmediately() {
-    if (!currentUser) return;
-
-    const userRef = getUserDocument();
-
-    await setDoc(userRef, {
-        ...data,
-        updatedAt: serverTimestamp()
-    }, { merge: true });
-}
-
-function saveData() {
-    if (!currentUser || isLoadingUserData) return;
-
-    const dataToSave = { ...data };
-
-    saveQueue = saveQueue
-        .then(async () => {
-            if (!currentUser) return;
-
-            const userRef = getUserDocument();
-
-            await setDoc(userRef, {
-                ...dataToSave,
-                updatedAt: serverTimestamp()
-            }, { merge: true });
-        })
-        .catch(error => {
-            console.error("Firestore save error:", error);
-            showToast("Unable to save your data. Check your connection.");
-        });
-}
-
-// =====================================
-// FORMAT WATER AMOUNT
-// =====================================
-
 function formatAmount(amount) {
     if (data.unit === "oz") {
         return (amount / 29.5735).toFixed(1) + " oz";
@@ -263,6 +163,126 @@ function formatAmount(amount) {
 
     return Math.round(amount) + " mL";
 }
+
+
+// =====================================
+// FIRESTORE DATA MANAGEMENT
+// =====================================
+
+async function loadUserData(user) {
+    const token = ++authLoadToken;
+
+    isLoadingUserData = true;
+
+    try {
+        const userRef = doc(db, "users", user.uid);
+        const userSnapshot = await getDoc(userRef);
+
+        if (
+            token !== authLoadToken ||
+            auth.currentUser?.uid !== user.uid
+        ) {
+            return;
+        }
+
+        const defaults = createDefaultData();
+
+        if (userSnapshot.exists()) {
+            const savedData = userSnapshot.data();
+
+            data = {
+                ...defaults,
+                ...savedData,
+                email: user.email || "",
+                name:
+                    user.displayName ||
+                    pendingName ||
+                    savedData.name ||
+                    user.email?.split("@")[0] ||
+                    "User",
+                history: Array.isArray(savedData.history)
+                    ? savedData.history
+                    : []
+            };
+
+        } else {
+            data = {
+                ...defaults,
+                email: user.email || "",
+                name:
+                    user.displayName ||
+                    pendingName ||
+                    user.email?.split("@")[0] ||
+                    "User"
+            };
+        }
+
+        // RESET DAILY INTAKE WHEN THE DATE CHANGES
+
+        if (data.date !== todayString()) {
+            data.date = todayString();
+            data.total = 0;
+            data.history = [];
+        }
+
+        // SAVE USER DATA TO FIRESTORE
+
+        await setDoc(
+            userRef,
+            {
+                ...data,
+                updatedAt: serverTimestamp()
+            },
+            { merge: true }
+        );
+
+        if (
+            token !== authLoadToken ||
+            auth.currentUser?.uid !== user.uid
+        ) {
+            return;
+        }
+
+        pendingName = "";
+
+        loadSettings();
+        showApplication();
+
+    } catch (error) {
+        console.error("Error loading user data:", error);
+
+        showToast("Unable to load your account data.");
+
+    } finally {
+        if (token === authLoadToken) {
+            isLoadingUserData = false;
+        }
+    }
+}
+
+
+// SAVE DATA TO FIRESTORE
+
+function saveData() {
+    if (!currentUser || isLoadingUserData) {
+        return;
+    }
+
+    const userRef = doc(db, "users", currentUser.uid);
+
+    const savedData = {
+        ...data,
+        updatedAt: serverTimestamp()
+    };
+
+    saveQueue = saveQueue
+        .then(() => setDoc(userRef, savedData, { merge: true }))
+        .catch(error => {
+            console.error("Error saving data:", error);
+            showToast("Unable to save your data.");
+        });
+}
+
 
 // =====================================
 // LOGIN AND REGISTER ELEMENTS
@@ -272,208 +292,6 @@ const loginPage = document.getElementById("loginPage");
 const registerPage = document.getElementById("registerPage");
 const app = document.getElementById("app");
 
-const loginForm = document.getElementById("loginForm");
-const registerForm = document.getElementById("registerForm");
-
-const loginError = document.getElementById("loginError");
-const registerError = document.getElementById("registerError");
-
-// =====================================
-// SWITCH BETWEEN LOGIN AND REGISTER
-// =====================================
-
-document.getElementById("showRegister").addEventListener("click", function(e) {
-    e.preventDefault();
-
-    loginPage.classList.add("hidden");
-    registerPage.classList.remove("hidden");
-
-    loginError.textContent = "";
-    registerError.textContent = "";
-});
-
-document.getElementById("showLogin").addEventListener("click", function(e) {
-    e.preventDefault();
-
-    registerPage.classList.add("hidden");
-    loginPage.classList.remove("hidden");
-
-    loginError.textContent = "";
-    registerError.textContent = "";
-});
-
-// =====================================
-// REGISTER ACCOUNT
-// =====================================
-
-registerForm.addEventListener("submit", async function(e) {
-    e.preventDefault();
-
-    const name = document.getElementById("registerName").value.trim();
-    const email = document.getElementById("registerEmail").value.trim();
-    const password = document.getElementById("registerPassword").value;
-    const confirmPassword = document.getElementById("confirmPassword").value;
-
-    registerError.textContent = "";
-
-    if (!name || !email || !password || !confirmPassword) {
-        registerError.textContent = "Please complete all fields.";
-        return;
-    }
-
-    if (password.length < 6) {
-        registerError.textContent = "Password must contain at least 6 characters.";
-        return;
-    }
-
-    if (password !== confirmPassword) {
-        registerError.textContent = "Passwords do not match.";
-        return;
-    }
-
-    const submitButton = registerForm.querySelector("button[type='submit']");
-    submitButton.disabled = true;
-    submitButton.textContent = "Creating Account...";
-
-    try {
-        pendingName = name;
-
-        const userCredential = await createUserWithEmailAndPassword(
-            auth,
-            email,
-            password
-        );
-
-        await updateProfile(userCredential.user, {
-            displayName: name
-        });
-
-        currentUser = userCredential.user;
-
-        data = {
-            ...createDefaultData(),
-            name: name,
-            email: email
-        };
-
-        await saveUserDataImmediately();
-
-        pendingName = "";
-
-        registerForm.reset();
-
-        showApplication();
-        showToast("Account created successfully!");
-
-    } catch (error) {
-        console.error("Registration error:", error);
-
-        registerError.textContent = getAuthErrorMessage(error);
-
-        pendingName = "";
-
-    } finally {
-        submitButton.disabled = false;
-        submitButton.textContent = "Register";
-    }
-});
-
-// =====================================
-// LOGIN ACCOUNT
-// =====================================
-
-loginForm.addEventListener("submit", async function(e) {
-    e.preventDefault();
-
-    const email = document.getElementById("email").value.trim();
-    const password = document.getElementById("password").value;
-
-    loginError.textContent = "";
-
-    if (!email || !password) {
-        loginError.textContent = "Please enter your email and password.";
-        return;
-    }
-
-    const submitButton = loginForm.querySelector("button[type='submit']");
-    submitButton.disabled = true;
-    submitButton.textContent = "Logging In...";
-
-    try {
-        await signInWithEmailAndPassword(auth, email, password);
-
-        loginForm.reset();
-
-        showToast("Welcome back!");
-
-    } catch (error) {
-        console.error("Login error:", error);
-
-        loginError.textContent = getAuthErrorMessage(error);
-
-    } finally {
-        submitButton.disabled = false;
-        submitButton.textContent = "Log In";
-    }
-});
-
-// =====================================
-// FIREBASE AUTHENTICATION ERROR MESSAGES
-// =====================================
-
-function getAuthErrorMessage(error) {
-    switch (error.code) {
-        case "auth/email-already-in-use":
-            return "This email is already registered.";
-
-        case "auth/invalid-email":
-            return "Please enter a valid email address.";
-
-        case "auth/weak-password":
-            return "Password must contain at least 6 characters.";
-
-        case "auth/invalid-credential":
-        case "auth/wrong-password":
-        case "auth/user-not-found":
-            return "Incorrect email or password.";
-
-        case "auth/too-many-requests":
-            return "Too many attempts. Please try again later.";
-
-        case "auth/network-request-failed":
-            return "Network error. Please check your internet connection.";
-
-        default:
-            return error.message || "Something went wrong. Please try again.";
-    }
-}
-
-// =====================================
-// RESTORE LOGIN SESSION
-// =====================================
-
-onAuthStateChanged(auth, async function(user) {
-    if (user) {
-        currentUser = user;
-
-        loginPage.classList.add("hidden");
-        registerPage.classList.add("hidden");
-
-        await loadUserData(user);
-
-    } else {
-        currentUser = null;
-        data = createDefaultData();
-
-        app.classList.add("hidden");
-        registerPage.classList.add("hidden");
-        loginPage.classList.remove("hidden");
-
-        if (window.reminderTimer) {
-            clearInterval(window.reminderTimer);
-        }
-    }
-});
 
 // =====================================
 // SHOW APPLICATION
@@ -494,40 +312,212 @@ function showApplication() {
     startReminderChecker();
 }
 
+
 // =====================================
-// LOG OUT / SIGN OUT
+// SWITCH LOGIN AND REGISTER
+// =====================================
+
+document.getElementById("showRegister").addEventListener("click", function(e) {
+    e.preventDefault();
+
+    loginPage.classList.add("hidden");
+    registerPage.classList.remove("hidden");
+
+    document.getElementById("loginError").textContent = "";
+});
+
+document.getElementById("showLogin").addEventListener("click", function(e) {
+    e.preventDefault();
+
+    registerPage.classList.add("hidden");
+    loginPage.classList.remove("hidden");
+
+    document.getElementById("registerError").textContent = "";
+});
+
+
+// =====================================
+// FIREBASE ERROR MESSAGES
+// =====================================
+
+function getAuthErrorMessage(error) {
+    switch (error.code) {
+        case "auth/email-already-in-use":
+            return "This email is already registered.";
+
+        case "auth/invalid-email":
+            return "Please enter a valid email address.";
+
+        case "auth/weak-password":
+            return "Password must contain at least 6 characters.";
+
+        case "auth/user-not-found":
+        case "auth/wrong-password":
+        case "auth/invalid-credential":
+            return "Incorrect email or password.";
+
+        case "auth/too-many-requests":
+            return "Too many attempts. Please try again later.";
+
+        case "auth/network-request-failed":
+            return "Network error. Please check your internet connection.";
+
+        default:
+            return "Something went wrong. Please try again.";
+    }
+}
+
+
+// =====================================
+// REGISTER ACCOUNT
+// =====================================
+
+document.getElementById("registerForm").addEventListener("submit", async function(e) {
+    e.preventDefault();
+
+    const name = document.getElementById("registerName").value.trim();
+    const email = document.getElementById("registerEmail").value.trim();
+    const password = document.getElementById("registerPassword").value;
+    const confirmPassword = document.getElementById("confirmPassword").value;
+
+    const errorMessage = document.getElementById("registerError");
+
+    errorMessage.textContent = "";
+
+    if (!name || !email || !password || !confirmPassword) {
+        errorMessage.textContent = "Please complete all fields.";
+        return;
+    }
+
+    if (password.length < 6) {
+        errorMessage.textContent = "Password must contain at least 6 characters.";
+        return;
+    }
+
+    if (password !== confirmPassword) {
+        errorMessage.textContent = "Passwords do not match.";
+        return;
+    }
+
+    pendingName = name;
+
+    try {
+        const userCredential = await createUserWithEmailAndPassword(
+            auth,
+            email,
+            password
+        );
+
+        await updateProfile(userCredential.user, {
+            displayName: name
+        });
+
+        currentUser = userCredential.user;
+
+        document.getElementById("registerForm").reset();
+
+        showToast("Account created successfully!");
+
+    } catch (error) {
+        console.error("Registration error:", error);
+
+        pendingName = "";
+        errorMessage.textContent = getAuthErrorMessage(error);
+    }
+});
+
+
+// =====================================
+// LOGIN ACCOUNT
+// =====================================
+
+document.getElementById("loginForm").addEventListener("submit", async function(e) {
+    e.preventDefault();
+
+    const email = document.getElementById("email").value.trim();
+    const password = document.getElementById("password").value;
+
+    const errorMessage = document.getElementById("loginError");
+
+    errorMessage.textContent = "";
+
+    if (!email || !password) {
+        errorMessage.textContent = "Please enter your email and password.";
+        return;
+    }
+
+    try {
+        await signInWithEmailAndPassword(auth, email, password);
+
+        document.getElementById("loginForm").reset();
+
+        showToast("Welcome to Water Intake Tracking!");
+
+    } catch (error) {
+        console.error("Login error:", error);
+
+        errorMessage.textContent = getAuthErrorMessage(error);
+    }
+});
+
+
+// =====================================
+// AUTHENTICATION STATE
+// =====================================
+
+onAuthStateChanged(auth, async function(user) {
+    if (user) {
+        currentUser = user;
+
+        loginPage.classList.add("hidden");
+        registerPage.classList.add("hidden");
+        app.classList.remove("hidden");
+
+        await loadUserData(user);
+
+    } else {
+        authLoadToken++;
+
+        currentUser = null;
+        data = createDefaultData();
+        isLoadingUserData = false;
+
+        app.classList.add("hidden");
+        registerPage.classList.add("hidden");
+        loginPage.classList.remove("hidden");
+
+        if (window.reminderTimer) {
+            clearInterval(window.reminderTimer);
+        }
+    }
+});
+
+
+// =====================================
+// LOGOUT
 // =====================================
 
 document.getElementById("logoutBtn").addEventListener("click", async function() {
     try {
         await saveQueue;
-
         await signOut(auth);
 
-        loginForm.reset();
-        registerForm.reset();
+        document.getElementById("password").value = "";
 
-        loginError.textContent = "";
-        registerError.textContent = "";
-
-        showToast("You have signed out.");
+        showToast("You have logged out.");
 
     } catch (error) {
-        console.error("Sign out error:", error);
-        showToast("Unable to sign out. Please try again.");
+        console.error("Logout error:", error);
+        showToast("Unable to log out. Please try again.");
     }
 });
+
 
 // =====================================
 // ADD WATER
 // =====================================
 
 function addWater(amount, container) {
-    if (!currentUser) {
-        showToast("Please log in first.");
-        return;
-    }
-
     if (!Number.isFinite(amount) || amount <= 0) {
         showToast("Please enter a valid amount.");
         return;
@@ -572,6 +562,7 @@ function addWater(amount, container) {
     }
 }
 
+
 // QUICK ADD BUTTONS
 
 document.querySelectorAll(".water-btn").forEach(button => {
@@ -582,6 +573,7 @@ document.querySelectorAll(".water-btn").forEach(button => {
         addWater(amount, container);
     });
 });
+
 
 // CUSTOM WATER
 
@@ -598,6 +590,7 @@ document.getElementById("customAddBtn").addEventListener("click", function() {
     input.value = "";
 });
 
+
 // =====================================
 // UPDATE DAILY DASHBOARD
 // =====================================
@@ -605,6 +598,7 @@ document.getElementById("customAddBtn").addEventListener("click", function() {
 function updateDashboard() {
     const percent = Math.floor((data.total / data.goal) * 100);
     const remaining = Math.max(data.goal - data.total, 0);
+
     const glasses = Math.floor(data.total / 250);
 
     document.getElementById("percentage").textContent =
@@ -637,6 +631,7 @@ function updateDashboard() {
     updateLevel(percent);
 }
 
+
 // =====================================
 // HYDRATION LEVELS
 // =====================================
@@ -665,6 +660,7 @@ function updateLevel(percent) {
         `).join("");
 }
 
+
 // =====================================
 // HYDRATION MESSAGES
 // =====================================
@@ -680,6 +676,7 @@ function changeMessage() {
 
 document.getElementById("nextMessage").addEventListener("click", changeMessage);
 
+
 // =====================================
 // HYDRATION TIPS
 // =====================================
@@ -693,6 +690,7 @@ function renderTips() {
             </div>
         `).join("");
 }
+
 
 // =====================================
 // ACHIEVEMENTS
@@ -715,6 +713,7 @@ function renderAchievements() {
             `;
         }).join("");
 }
+
 
 // =====================================
 // WORKDAY SCHEDULE
@@ -755,6 +754,7 @@ function minutesToTime(minutes) {
 
 function renderSchedule() {
     const schedule = getSchedule();
+
     const container = document.getElementById("scheduleContainer");
 
     if (!schedule.length) {
@@ -781,6 +781,7 @@ function renderSchedule() {
         });
     });
 }
+
 
 // =====================================
 // WATER INTAKE HISTORY
@@ -816,11 +817,10 @@ function renderHistory() {
     `).join("");
 }
 
+
 // CLEAR HISTORY
 
 document.getElementById("clearHistory").addEventListener("click", function() {
-    if (!currentUser) return;
-
     if (!confirm("Are you sure you want to clear today's water history?")) {
         return;
     }
@@ -833,6 +833,7 @@ document.getElementById("clearHistory").addEventListener("click", function() {
 
     showToast("Today's records have been cleared.");
 });
+
 
 // =====================================
 // PROFILE AND SETTINGS
@@ -857,6 +858,7 @@ function loadSettings() {
         data.unit;
 }
 
+
 // SAVE DAILY GOAL
 
 document.getElementById("saveGoal").addEventListener("click", function() {
@@ -875,6 +877,7 @@ document.getElementById("saveGoal").addEventListener("click", function() {
     showToast("Daily water goal updated!");
 });
 
+
 // SAVE REMINDERS
 
 document.getElementById("saveReminders").addEventListener("click", async function() {
@@ -887,6 +890,11 @@ document.getElementById("saveReminders").addEventListener("click", async functio
 
     if (!start || !end || timeToMinutes(end) <= timeToMinutes(start)) {
         showToast("Please enter a valid workday schedule.");
+        return;
+    }
+
+    if (!Number.isInteger(interval) || interval < 1) {
+        showToast("Please enter a valid reminder interval.");
         return;
     }
 
@@ -918,6 +926,7 @@ document.getElementById("saveReminders").addEventListener("click", async functio
     showToast("Reminder settings saved!");
 });
 
+
 // SAVE MEASUREMENT PREFERENCE
 
 document.getElementById("saveUnit").addEventListener("click", function() {
@@ -928,6 +937,7 @@ document.getElementById("saveUnit").addEventListener("click", function() {
 
     showToast("Measurement preference updated!");
 });
+
 
 // =====================================
 // BROWSER REMINDERS
@@ -940,7 +950,11 @@ function startReminderChecker() {
         clearInterval(window.reminderTimer);
     }
 
-    if (!data.remindersEnabled || !currentUser) {
+    if (!data.remindersEnabled) {
+        return;
+    }
+
+    if (!("Notification" in window) || Notification.permission !== "granted") {
         return;
     }
 
@@ -955,8 +969,7 @@ function startReminderChecker() {
 
         if (
             getSchedule().includes(currentTime) &&
-            key !== lastReminderKey &&
-            Notification.permission === "granted"
+            key !== lastReminderKey
         ) {
             lastReminderKey = key;
 
@@ -966,6 +979,7 @@ function startReminderChecker() {
         }
     }, 15000);
 }
+
 
 // =====================================
 // BOTTOM NAVIGATION
@@ -981,6 +995,10 @@ const pages = {
 document.querySelectorAll(".nav-btn").forEach(button => {
     button.addEventListener("click", function() {
         const page = this.dataset.page;
+
+        if (!pages[page]) {
+            return;
+        }
 
         Object.values(pages).forEach(id => {
             document.getElementById(id).classList.add("hidden");
@@ -1006,6 +1024,7 @@ document.querySelectorAll(".nav-btn").forEach(button => {
     });
 });
 
+
 // =====================================
 // DATE AND GENERAL DISPLAY
 // =====================================
@@ -1019,6 +1038,7 @@ function updateDate() {
             year: "numeric"
         });
 }
+
 
 // =====================================
 // TOAST MESSAGE
@@ -1039,6 +1059,7 @@ function showToast(message) {
     }, 2500);
 }
 
+
 // =====================================
 // RENDER EVERYTHING
 // =====================================
@@ -1051,3 +1072,6 @@ function renderAll() {
     renderHistory();
     renderSchedule();
 }
+
+// No initial renderAll() here.
+// The application renders after Firebase loads the signed-in user's data.
