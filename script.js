@@ -1,29 +1,19 @@
 
 // =====================================
 // WATER INTAKE TRACKING APPLICATION
-// FIREBASE AUTHENTICATION + FIRESTORE
+// FIREBASE AUTHENTICATION
 // =====================================
 
-// FIREBASE IMPORTS
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import {
     getAuth,
     createUserWithEmailAndPassword,
     signInWithEmailAndPassword,
-    signOut,
     updateProfile,
-    onAuthStateChanged
-} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-
-import {
-    getFirestore,
-    doc,
-    getDoc,
-    setDoc,
-    serverTimestamp
-} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-
+    onAuthStateChanged,
+    signOut
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 // =====================================
 // FIREBASE CONFIGURATION
@@ -41,14 +31,15 @@ const firebaseConfig = {
 
 const firebaseApp = initializeApp(firebaseConfig);
 const auth = getAuth(firebaseApp);
-const db = getFirestore(firebaseApp);
-
 
 // =====================================
 // DEFAULT SETTINGS
 // =====================================
 
 const DEFAULT_GOAL = 2000;
+const STORAGE_KEY = "waterTrackerData";
+
+let currentUser = null;
 
 const messages = [
     "Water is essential for maintaining normal body functions.",
@@ -117,26 +108,49 @@ const achievements = [
     { percent: 100, name: "Goal Achiever", icon: "🏆" }
 ];
 
-
-// =====================================
-// APPLICATION VARIABLES
-// =====================================
-
-let currentUser = null;
-let pendingName = "";
-let isLoadingUserData = false;
-let saveQueue = Promise.resolve();
-let authLoadToken = 0;
-
-let data = createDefaultData();
-
-
 // =====================================
 // DATA MANAGEMENT
 // =====================================
 
 function todayString() {
     return new Date().toLocaleDateString("en-CA");
+}
+
+function getStorageKey(userId = currentUser?.uid) {
+    return userId
+        ? `${STORAGE_KEY}_${userId}`
+        : STORAGE_KEY;
+}
+
+function loadData(userId = null) {
+    try {
+        const saved = JSON.parse(
+            localStorage.getItem(getStorageKey(userId))
+        );
+
+        if (!saved || typeof saved !== "object") {
+            return createDefaultData();
+        }
+
+        if (saved.date !== todayString()) {
+            return {
+                ...createDefaultData(),
+                ...saved,
+                date: todayString(),
+                total: 0,
+                history: []
+            };
+        }
+
+        return {
+            ...createDefaultData(),
+            ...saved,
+            history: Array.isArray(saved.history) ? saved.history : []
+        };
+
+    } catch {
+        return createDefaultData();
+    }
 }
 
 function createDefaultData() {
@@ -156,6 +170,17 @@ function createDefaultData() {
     };
 }
 
+let data = createDefaultData();
+
+function saveData() {
+    if (!currentUser) return;
+
+    localStorage.setItem(
+        getStorageKey(),
+        JSON.stringify(data)
+    );
+}
+
 function formatAmount(amount) {
     if (data.unit === "oz") {
         return (amount / 29.5735).toFixed(1) + " oz";
@@ -164,242 +189,185 @@ function formatAmount(amount) {
     return Math.round(amount) + " mL";
 }
 
-
-// =====================================
-// FIRESTORE DATA MANAGEMENT
-// =====================================
-
-async function loadUserData(user) {
-    const token = ++authLoadToken;
-
-    isLoadingUserData = true;
-
-    try {
-        const userRef = doc(db, "users", user.uid);
-        const userSnapshot = await getDoc(userRef);
-
-        if (
-            token !== authLoadToken ||
-            auth.currentUser?.uid !== user.uid
-        ) {
-            return;
-        }
-
-        const defaults = createDefaultData();
-
-        if (userSnapshot.exists()) {
-            const savedData = userSnapshot.data();
-
-            data = {
-                ...defaults,
-                ...savedData,
-                email: user.email || "",
-                name:
-                    user.displayName ||
-                    pendingName ||
-                    savedData.name ||
-                    user.email?.split("@")[0] ||
-                    "User",
-                history: Array.isArray(savedData.history)
-                    ? savedData.history
-                    : []
-            };
-
-        } else {
-            data = {
-                ...defaults,
-                email: user.email || "",
-                name:
-                    user.displayName ||
-                    pendingName ||
-                    user.email?.split("@")[0] ||
-                    "User"
-            };
-        }
-
-        // RESET DAILY INTAKE WHEN THE DATE CHANGES
-
-        if (data.date !== todayString()) {
-            data.date = todayString();
-            data.total = 0;
-            data.history = [];
-        }
-
-        // SAVE USER DATA TO FIRESTORE
-
-        await setDoc(
-            userRef,
-            {
-                ...data,
-                updatedAt: serverTimestamp()
-            },
-            { merge: true }
-        );
-
-        if (
-            token !== authLoadToken ||
-            auth.currentUser?.uid !== user.uid
-        ) {
-            return;
-        }
-
-        pendingName = "";
-
-        loadSettings();
-        showApplication();
-
-    } catch (error) {
-        console.error("Error loading user data:", error);
-
-        showToast("Unable to load your account data.");
-
-    } finally {
-        if (token === authLoadToken) {
-            isLoadingUserData = false;
-        }
-    }
-}
-
-
-// SAVE DATA TO FIRESTORE
-
-function saveData() {
-    if (!currentUser || isLoadingUserData) {
-        return;
-    }
-
-    const userRef = doc(db, "users", currentUser.uid);
-
-    const savedData = {
-        ...data,
-        updatedAt: serverTimestamp()
-    };
-
-    saveQueue = saveQueue
-        .then(() => setDoc(userRef, savedData, { merge: true }))
-        .catch(error => {
-            console.error("Error saving data:", error);
-            showToast("Unable to save your data.");
-        });
-}
-
-
 // =====================================
 // LOGIN AND REGISTER ELEMENTS
 // =====================================
 
 const loginPage = document.getElementById("loginPage");
-const registerPage = document.getElementById("registerPage");
 const app = document.getElementById("app");
 
+const loginForm = document.getElementById("loginForm");
+const registerForm = document.getElementById("registerForm");
+
+const loginError = document.getElementById("loginError");
+const registerError = document.getElementById("registerError");
 
 // =====================================
-// SHOW APPLICATION
+// SHOW LOGIN FORM
 // =====================================
 
-function showApplication() {
-    loginPage.classList.add("hidden");
-    registerPage.classList.add("hidden");
-    app.classList.remove("hidden");
+function showLoginForm() {
+    loginPage.classList.remove("hidden");
 
-    document.getElementById("headerName").textContent = data.name;
-    document.getElementById("welcomeName").textContent = data.name;
-    document.getElementById("profileName").textContent = data.name;
-    document.getElementById("profileEmail").textContent = data.email;
+    loginForm.classList.remove("hidden");
+    registerForm.classList.add("hidden");
 
-    loadSettings();
-    renderAll();
-    startReminderChecker();
+    document.getElementById("loginRegisterLink")
+        .classList.remove("hidden");
+
+    document.getElementById("registerLoginLink")
+        .classList.add("hidden");
+
+    document.getElementById("formTitle").textContent =
+        "Water Intake Tracking";
+
+    document.getElementById("formSubtitle").textContent =
+        "Stay hydrated. Stay productive.";
+
+    document.getElementById("loginNote")
+        .classList.remove("hidden");
+
+    loginError.textContent = "";
+    registerError.textContent = "";
 }
 
+// =====================================
+// SHOW REGISTER FORM
+// =====================================
+
+function showRegisterForm() {
+    loginPage.classList.remove("hidden");
+
+    loginForm.classList.add("hidden");
+    registerForm.classList.remove("hidden");
+
+    document.getElementById("loginRegisterLink")
+        .classList.add("hidden");
+
+    document.getElementById("registerLoginLink")
+        .classList.remove("hidden");
+
+    document.getElementById("formTitle").textContent =
+        "Create an Account";
+
+    document.getElementById("formSubtitle").textContent =
+        "Start your hydration journey today.";
+
+    document.getElementById("loginNote")
+        .classList.add("hidden");
+
+    loginError.textContent = "";
+    registerError.textContent = "";
+}
 
 // =====================================
 // SWITCH LOGIN AND REGISTER
 // =====================================
 
-document.getElementById("showRegister").addEventListener("click", function(e) {
-    e.preventDefault();
+document.getElementById("showRegister")
+    .addEventListener("click", function(event) {
+        event.preventDefault();
+        showRegisterForm();
+    });
 
-    loginPage.classList.add("hidden");
-    registerPage.classList.remove("hidden");
-
-    document.getElementById("loginError").textContent = "";
-});
-
-document.getElementById("showLogin").addEventListener("click", function(e) {
-    e.preventDefault();
-
-    registerPage.classList.add("hidden");
-    loginPage.classList.remove("hidden");
-
-    document.getElementById("registerError").textContent = "";
-});
-
+document.getElementById("showLogin")
+    .addEventListener("click", function(event) {
+        event.preventDefault();
+        showLoginForm();
+    });
 
 // =====================================
 // FIREBASE ERROR MESSAGES
 // =====================================
 
 function getAuthErrorMessage(error) {
-    switch (error.code) {
-        case "auth/email-already-in-use":
-            return "This email is already registered.";
+    const messages = {
+        "auth/email-already-in-use":
+            "This email is already registered. Please log in instead.",
 
-        case "auth/invalid-email":
-            return "Please enter a valid email address.";
+        "auth/invalid-email":
+            "Please enter a valid email address.",
 
-        case "auth/weak-password":
-            return "Password must contain at least 6 characters.";
+        "auth/weak-password":
+            "Your password must contain at least 6 characters.",
 
-        case "auth/user-not-found":
-        case "auth/wrong-password":
-        case "auth/invalid-credential":
-            return "Incorrect email or password.";
+        "auth/invalid-credential":
+            "Incorrect email or password. Please try again.",
 
-        case "auth/too-many-requests":
-            return "Too many attempts. Please try again later.";
+        "auth/user-disabled":
+            "This account has been disabled.",
 
-        case "auth/network-request-failed":
-            return "Network error. Please check your internet connection.";
+        "auth/too-many-requests":
+            "Too many attempts. Please wait and try again.",
 
-        default:
-            return "Something went wrong. Please try again.";
-    }
+        "auth/operation-not-allowed":
+            "Email and Password sign-in is not enabled in Firebase.",
+
+        "auth/network-request-failed":
+            "Network error. Please check your internet connection."
+    };
+
+    return messages[error.code] ||
+        "Something went wrong. Please try again.";
 }
 
+// =====================================
+// FIREBASE LOGIN
+// =====================================
+
+loginForm.addEventListener("submit", async function(event) {
+    event.preventDefault();
+
+    loginError.textContent = "";
+
+    const email = document.getElementById("email").value.trim();
+    const password = document.getElementById("password").value;
+
+    try {
+        await signInWithEmailAndPassword(
+            auth,
+            email,
+            password
+        );
+
+        loginForm.reset();
+
+    } catch (error) {
+        loginError.textContent = getAuthErrorMessage(error);
+    }
+});
 
 // =====================================
-// REGISTER ACCOUNT
+// FIREBASE REGISTER
 // =====================================
 
-document.getElementById("registerForm").addEventListener("submit", async function(e) {
-    e.preventDefault();
+registerForm.addEventListener("submit", async function(event) {
+    event.preventDefault();
+
+    registerError.textContent = "";
 
     const name = document.getElementById("registerName").value.trim();
     const email = document.getElementById("registerEmail").value.trim();
     const password = document.getElementById("registerPassword").value;
     const confirmPassword = document.getElementById("confirmPassword").value;
 
-    const errorMessage = document.getElementById("registerError");
-
-    errorMessage.textContent = "";
-
-    if (!name || !email || !password || !confirmPassword) {
-        errorMessage.textContent = "Please complete all fields.";
+    if (!name) {
+        registerError.textContent =
+            "Please enter your full name.";
         return;
     }
 
     if (password.length < 6) {
-        errorMessage.textContent = "Password must contain at least 6 characters.";
+        registerError.textContent =
+            "Password must contain at least 6 characters.";
         return;
     }
 
     if (password !== confirmPassword) {
-        errorMessage.textContent = "Passwords do not match.";
+        registerError.textContent =
+            "Passwords do not match. Please try again.";
         return;
     }
-
-    pendingName = name;
 
     try {
         const userCredential = await createUserWithEmailAndPassword(
@@ -414,104 +382,90 @@ document.getElementById("registerForm").addEventListener("submit", async functio
 
         currentUser = userCredential.user;
 
-        document.getElementById("registerForm").reset();
+        data = loadData(currentUser.uid);
+        data.name = name;
+        data.email = email;
 
-        showToast("Account created successfully!");
+        saveData();
+
+        registerForm.reset();
+
+        document.getElementById("headerName").textContent = name;
+        document.getElementById("welcomeName").textContent = name;
+        document.getElementById("profileName").textContent = name;
+        document.getElementById("profileEmail").textContent = email;
+
+        showToast("Account registered successfully!");
 
     } catch (error) {
-        console.error("Registration error:", error);
-
-        pendingName = "";
-        errorMessage.textContent = getAuthErrorMessage(error);
+        registerError.textContent = getAuthErrorMessage(error);
     }
 });
 
-
 // =====================================
-// LOGIN ACCOUNT
-// =====================================
-
-document.getElementById("loginForm").addEventListener("submit", async function(e) {
-    e.preventDefault();
-
-    const email = document.getElementById("email").value.trim();
-    const password = document.getElementById("password").value;
-
-    const errorMessage = document.getElementById("loginError");
-
-    errorMessage.textContent = "";
-
-    if (!email || !password) {
-        errorMessage.textContent = "Please enter your email and password.";
-        return;
-    }
-
-    try {
-        await signInWithEmailAndPassword(auth, email, password);
-
-        document.getElementById("loginForm").reset();
-
-        showToast("Welcome to Water Intake Tracking!");
-
-    } catch (error) {
-        console.error("Login error:", error);
-
-        errorMessage.textContent = getAuthErrorMessage(error);
-    }
-});
-
-
-// =====================================
-// AUTHENTICATION STATE
+// SHOW APPLICATION
 // =====================================
 
-onAuthStateChanged(auth, async function(user) {
+function showApplication() {
+    loginPage.classList.add("hidden");
+    app.classList.remove("hidden");
+
+    document.getElementById("headerName").textContent = data.name;
+    document.getElementById("welcomeName").textContent = data.name;
+    document.getElementById("profileName").textContent = data.name;
+    document.getElementById("profileEmail").textContent = data.email;
+
+    loadSettings();
+    renderAll();
+    startReminderChecker();
+}
+
+// =====================================
+// FIREBASE AUTHENTICATION SESSION
+// =====================================
+
+onAuthStateChanged(auth, function(user) {
+    currentUser = user;
+
     if (user) {
-        currentUser = user;
+        data = loadData(user.uid);
 
-        loginPage.classList.add("hidden");
-        registerPage.classList.add("hidden");
-        app.classList.remove("hidden");
+        data.email = user.email || "";
 
-        await loadUserData(user);
+        data.name = user.displayName ||
+            data.name ||
+            (user.email ? user.email.split("@")[0] : "User");
+
+        saveData();
+
+        showApplication();
 
     } else {
-        authLoadToken++;
-
-        currentUser = null;
-        data = createDefaultData();
-        isLoadingUserData = false;
-
-        app.classList.add("hidden");
-        registerPage.classList.add("hidden");
-        loginPage.classList.remove("hidden");
-
         if (window.reminderTimer) {
             clearInterval(window.reminderTimer);
         }
+
+        data = createDefaultData();
+
+        app.classList.add("hidden");
+        showLoginForm();
     }
 });
 
-
 // =====================================
-// LOGOUT
+// FIREBASE LOGOUT
 // =====================================
 
-document.getElementById("logoutBtn").addEventListener("click", async function() {
-    try {
-        await saveQueue;
-        await signOut(auth);
+document.getElementById("logoutBtn")
+    .addEventListener("click", async function() {
+        try {
+            await signOut(auth);
+            showToast("You have logged out.");
 
-        document.getElementById("password").value = "";
-
-        showToast("You have logged out.");
-
-    } catch (error) {
-        console.error("Logout error:", error);
-        showToast("Unable to log out. Please try again.");
-    }
-});
-
+        } catch (error) {
+            showToast("Unable to log out. Please try again.");
+        }
+    });
 
 // =====================================
 // ADD WATER
@@ -562,7 +516,6 @@ function addWater(amount, container) {
     }
 }
 
-
 // QUICK ADD BUTTONS
 
 document.querySelectorAll(".water-btn").forEach(button => {
@@ -574,22 +527,21 @@ document.querySelectorAll(".water-btn").forEach(button => {
     });
 });
 
-
 // CUSTOM WATER
 
-document.getElementById("customAddBtn").addEventListener("click", function() {
-    const input = document.getElementById("customAmount");
-    const amount = Number(input.value);
+document.getElementById("customAddBtn")
+    .addEventListener("click", function() {
+        const input = document.getElementById("customAmount");
+        const amount = Number(input.value);
 
-    if (!Number.isInteger(amount) || amount <= 0) {
-        showToast("Enter a valid water amount in mL.");
-        return;
-    }
+        if (!Number.isInteger(amount) || amount <= 0) {
+            showToast("Enter a valid water amount in mL.");
+            return;
+        }
 
-    addWater(amount, "Custom Entry");
-    input.value = "";
-});
-
+        addWater(amount, "Custom Entry");
+        input.value = "";
+    });
 
 // =====================================
 // UPDATE DAILY DASHBOARD
@@ -626,11 +578,10 @@ function updateDashboard() {
     document.getElementById("progressCaption").textContent =
         percent >= 100
             ? "Congratulations! You reached your daily goal!"
-            : formatAmount(remaining) + " remaining to reach your goal.";
+            : remaining + " mL remaining to reach your goal.";
 
     updateLevel(percent);
 }
-
 
 // =====================================
 // HYDRATION LEVELS
@@ -660,7 +611,6 @@ function updateLevel(percent) {
         `).join("");
 }
 
-
 // =====================================
 // HYDRATION MESSAGES
 // =====================================
@@ -674,8 +624,8 @@ function changeMessage() {
         messages[messageIndex];
 }
 
-document.getElementById("nextMessage").addEventListener("click", changeMessage);
-
+document.getElementById("nextMessage")
+    .addEventListener("click", changeMessage);
 
 // =====================================
 // HYDRATION TIPS
@@ -690,7 +640,6 @@ function renderTips() {
             </div>
         `).join("");
 }
-
 
 // =====================================
 // ACHIEVEMENTS
@@ -713,7 +662,6 @@ function renderAchievements() {
             `;
         }).join("");
 }
-
 
 // =====================================
 // WORKDAY SCHEDULE
@@ -782,7 +730,6 @@ function renderSchedule() {
     });
 }
 
-
 // =====================================
 // WATER INTAKE HISTORY
 // =====================================
@@ -817,23 +764,22 @@ function renderHistory() {
     `).join("");
 }
 
-
 // CLEAR HISTORY
 
-document.getElementById("clearHistory").addEventListener("click", function() {
-    if (!confirm("Are you sure you want to clear today's water history?")) {
-        return;
-    }
+document.getElementById("clearHistory")
+    .addEventListener("click", function() {
+        if (!confirm("Are you sure you want to clear today's water history?")) {
+            return;
+        }
 
-    data.total = 0;
-    data.history = [];
+        data.total = 0;
+        data.history = [];
 
-    saveData();
-    renderAll();
+        saveData();
+        renderAll();
 
-    showToast("Today's records have been cleared.");
-});
-
+        showToast("Today's records have been cleared.");
+    });
 
 // =====================================
 // PROFILE AND SETTINGS
@@ -858,86 +804,83 @@ function loadSettings() {
         data.unit;
 }
 
-
 // SAVE DAILY GOAL
 
-document.getElementById("saveGoal").addEventListener("click", function() {
-    const goal = Number(document.getElementById("goalInput").value);
+document.getElementById("saveGoal")
+    .addEventListener("click", function() {
+        const goal = Number(
+            document.getElementById("goalInput").value
+        );
 
-    if (!Number.isInteger(goal) || goal < 1 || goal > 10000) {
-        showToast("Enter a goal between 1 and 10,000 mL.");
-        return;
-    }
+        if (!Number.isInteger(goal) || goal < 1 || goal > 10000) {
+            showToast("Enter a goal between 1 and 10,000 mL.");
+            return;
+        }
 
-    data.goal = goal;
+        data.goal = goal;
 
-    saveData();
-    renderAll();
+        saveData();
+        renderAll();
 
-    showToast("Daily water goal updated!");
-});
-
+        showToast("Daily water goal updated!");
+    });
 
 // SAVE REMINDERS
 
-document.getElementById("saveReminders").addEventListener("click", async function() {
-    const start = document.getElementById("reminderStart").value;
-    const end = document.getElementById("reminderEnd").value;
+document.getElementById("saveReminders")
+    .addEventListener("click", async function() {
+        const start = document.getElementById("reminderStart").value;
+        const end = document.getElementById("reminderEnd").value;
 
-    const interval = Number(
-        document.getElementById("reminderInterval").value
-    );
+        const interval = Number(
+            document.getElementById("reminderInterval").value
+        );
 
-    if (!start || !end || timeToMinutes(end) <= timeToMinutes(start)) {
-        showToast("Please enter a valid workday schedule.");
-        return;
-    }
-
-    if (!Number.isInteger(interval) || interval < 1) {
-        showToast("Please enter a valid reminder interval.");
-        return;
-    }
-
-    const enabled = document.getElementById("remindersEnabled").checked;
-
-    if (enabled && !("Notification" in window)) {
-        showToast("Browser notifications are not supported.");
-        return;
-    }
-
-    if (enabled && Notification.permission !== "granted") {
-        const permission = await Notification.requestPermission();
-
-        if (permission !== "granted") {
-            showToast("Notification permission was not granted.");
+        if (!start || !end || timeToMinutes(end) <= timeToMinutes(start)) {
+            showToast("Please enter a valid workday schedule.");
             return;
         }
-    }
 
-    data.reminderStart = start;
-    data.reminderEnd = end;
-    data.reminderInterval = interval;
-    data.remindersEnabled = enabled;
+        const enabled =
+            document.getElementById("remindersEnabled").checked;
 
-    saveData();
-    renderSchedule();
-    startReminderChecker();
+        if (enabled && !("Notification" in window)) {
+            showToast("Browser notifications are not supported.");
+            return;
+        }
 
-    showToast("Reminder settings saved!");
-});
+        if (enabled && Notification.permission !== "granted") {
+            const permission = await Notification.requestPermission();
 
+            if (permission !== "granted") {
+                showToast("Notification permission was not granted.");
+                return;
+            }
+        }
+
+        data.reminderStart = start;
+        data.reminderEnd = end;
+        data.reminderInterval = interval;
+        data.remindersEnabled = enabled;
+
+        saveData();
+        renderSchedule();
+        startReminderChecker();
+
+        showToast("Reminder settings saved!");
+    });
 
 // SAVE MEASUREMENT PREFERENCE
 
-document.getElementById("saveUnit").addEventListener("click", function() {
-    data.unit = document.getElementById("unitSelect").value;
+document.getElementById("saveUnit")
+    .addEventListener("click", function() {
+        data.unit = document.getElementById("unitSelect").value;
 
-    saveData();
-    renderAll();
+        saveData();
+        renderAll();
 
-    showToast("Measurement preference updated!");
-});
-
+        showToast("Measurement preference updated!");
+    });
 
 // =====================================
 // BROWSER REMINDERS
@@ -954,10 +897,6 @@ function startReminderChecker() {
         return;
     }
 
-    if (!("Notification" in window) || Notification.permission !== "granted") {
-        return;
-    }
-
     window.reminderTimer = setInterval(() => {
         const now = new Date();
 
@@ -969,7 +908,8 @@ function startReminderChecker() {
 
         if (
             getSchedule().includes(currentTime) &&
-            key !== lastReminderKey
+            key !== lastReminderKey &&
+            Notification.permission === "granted"
         ) {
             lastReminderKey = key;
 
@@ -979,7 +919,6 @@ function startReminderChecker() {
         }
     }, 15000);
 }
-
 
 // =====================================
 // BOTTOM NAVIGATION
@@ -996,15 +935,12 @@ document.querySelectorAll(".nav-btn").forEach(button => {
     button.addEventListener("click", function() {
         const page = this.dataset.page;
 
-        if (!pages[page]) {
-            return;
-        }
-
         Object.values(pages).forEach(id => {
             document.getElementById(id).classList.add("hidden");
         });
 
-        document.getElementById(pages[page]).classList.remove("hidden");
+        document.getElementById(pages[page])
+            .classList.remove("hidden");
 
         document.querySelectorAll(".nav-btn").forEach(nav => {
             nav.classList.remove("active");
@@ -1020,10 +956,12 @@ document.querySelectorAll(".nav-btn").forEach(button => {
             renderSchedule();
         }
 
-        window.scrollTo({ top: 0, behavior: "smooth" });
+        window.scrollTo({
+            top: 0,
+            behavior: "smooth"
+        });
     });
 });
-
 
 // =====================================
 // DATE AND GENERAL DISPLAY
@@ -1038,7 +976,6 @@ function updateDate() {
             year: "numeric"
         });
 }
-
 
 // =====================================
 // TOAST MESSAGE
@@ -1059,7 +996,6 @@ function showToast(message) {
     }, 2500);
 }
 
-
 // =====================================
 // RENDER EVERYTHING
 // =====================================
@@ -1072,6 +1008,3 @@ function renderAll() {
     renderHistory();
     renderSchedule();
 }
-
-// No initial renderAll() here.
-// The application renders after Firebase loads the signed-in user's data.
