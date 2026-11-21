@@ -879,6 +879,8 @@ input:focus, select:focus {
         width: 25%;
     }
 
+    /* REGISTER AND LOGIN MOBILE CARD */
+
     .login-card {
         padding: 32px 22px;
     }
