@@ -38,7 +38,7 @@ button {
     display: none !important;
 }
 
-/* LOGIN AND REGISTER */
+/* LOGIN */
 
 .login-page {
     min-height: 100vh;
@@ -120,22 +120,19 @@ input:focus, select:focus {
     margin-top: 18px;
 }
 
-/* REGISTER AND LOGIN LINKS */
-
-.register-switch {
+.register-link {
     font-size: 13px;
     color: var(--muted);
-    margin-top: 22px;
+    margin-top: 20px;
 }
 
-.register-switch a {
+.register-link a {
     color: var(--blue);
     font-weight: 700;
     text-decoration: none;
-    margin-left: 4px;
 }
 
-.register-switch a:hover {
+.register-link a:hover {
     color: var(--dark-blue);
     text-decoration: underline;
 }
@@ -877,11 +874,5 @@ input:focus, select:focus {
 
     .nav-btn {
         width: 25%;
-    }
-
-    /* REGISTER AND LOGIN MOBILE CARD */
-
-    .login-card {
-        padding: 32px 22px;
     }
 }
