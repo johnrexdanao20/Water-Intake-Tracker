@@ -1,0 +1,376 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Water Intake Tracking</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<!-- LOGIN PAGE -->
+<section id="loginPage" class="login-page">
+    <div class="login-card">
+        <div class="logo">💧</div>
+        <h1>Water Intake Tracking</h1>
+        <p class="subtitle">Stay hydrated. Stay productive.</p>
+
+        <!-- LOGIN FORM -->
+        <form id="loginForm">
+            <label for="email">Email Address</label>
+            <input type="email" id="email" placeholder="Enter your email" required>
+
+            <label for="password">Password</label>
+            <input type="password" id="password" placeholder="Enter your password" required>
+
+            <button type="submit" class="primary-btn">Log In</button>
+        </form>
+
+        <p class="register-switch">
+            Don't have an account?
+            <a href="#" id="showRegister">Register</a>
+        </p>
+
+        <p class="login-note">Your daily hydration journey starts here.</p>
+        <p id="loginError" class="error"></p>
+    </div>
+</section>
+
+<!-- REGISTER PAGE -->
+<section id="registerPage" class="login-page hidden">
+    <div class="login-card">
+        <div class="logo">💧</div>
+        <h1>Create Account</h1>
+        <p class="subtitle">Start your hydration journey today.</p>
+
+        <!-- REGISTER FORM -->
+        <form id="registerForm">
+            <label for="registerName">Full Name</label>
+            <input type="text" id="registerName" placeholder="Enter your full name" required>
+
+            <label for="registerEmail">Email Address</label>
+            <input type="email" id="registerEmail" placeholder="Enter your email" required>
+
+            <label for="registerPassword">Password</label>
+            <input type="password" id="registerPassword" placeholder="Create a password" minlength="6" required>
+
+            <label for="confirmPassword">Confirm Password</label>
+            <input type="password" id="confirmPassword" placeholder="Confirm your password" minlength="6" required>
+
+            <button type="submit" class="primary-btn">Register</button>
+        </form>
+
+        <p class="register-switch">
+            Already have an account?
+            <a href="#" id="showLogin">Log In</a>
+        </p>
+
+        <p class="login-note">Your daily hydration journey starts here.</p>
+        <p id="registerError" class="error"></p>
+    </div>
+</section>
+
+<!-- MAIN APPLICATION -->
+<div id="app" class="app hidden">
+
+    <header class="topbar">
+        <div class="brand">
+            <span class="brand-icon">💧</span>
+            <div>
+                <h2>Water Intake</h2>
+                <small>TRACKING</small>
+            </div>
+        </div>
+
+        <div class="user-info">
+            <span id="headerName">User</span>
+            <div class="avatar">👤</div>
+        </div>
+    </header>
+
+    <main class="main-content">
+
+        <!-- HOME -->
+        <section id="homeSection" class="page-section">
+
+            <div class="welcome">
+                <div>
+                    <p class="eyebrow">YOUR DAILY HYDRATION</p>
+                    <h1>Hello, <span id="welcomeName">User</span>! 👋</h1>
+                    <p>Stay refreshed throughout your workday.</p>
+                </div>
+                <div class="date-display" id="todayDate"></div>
+            </div>
+
+            <!-- DAILY INTAKE -->
+            <div class="dashboard-grid">
+
+                <div class="card intake-card">
+                    <div class="section-heading">
+                        <div>
+                            <p class="eyebrow">DAILY OVERVIEW</p>
+                            <h2>Today's Water Intake</h2>
+                        </div>
+                        <span class="drop-icon">💧</span>
+                    </div>
+
+                    <div class="progress-layout">
+                        <div class="circle-progress" id="circleProgress">
+                            <div class="circle-inner">
+                                <strong id="percentage">0%</strong>
+                                <span>Completed</span>
+                            </div>
+                        </div>
+
+                        <div class="intake-details">
+                            <div>
+                                <span class="detail-label">Consumed</span>
+                                <h2 id="totalIntake">0 mL</h2>
+                            </div>
+                            <div>
+                                <span class="detail-label">Daily Goal</span>
+                                <h2 id="dailyGoal">2000 mL</h2>
+                            </div>
+                            <div>
+                                <span class="detail-label">Remaining</span>
+                                <h2 id="remaining">2000 mL</h2>
+                            </div>
+                            <div>
+                                <span class="detail-label">Glasses</span>
+                                <h2 id="glasses">0</h2>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="progress-track">
+                        <div id="mainProgress" class="progress-fill"></div>
+                    </div>
+
+                    <p class="progress-caption" id="progressCaption">
+                        Every sip brings you closer to your goal!
+                    </p>
+                </div>
+
+                <!-- LEVEL CARD -->
+                <div class="card level-card">
+                    <p class="eyebrow">YOUR HYDRATION STATUS</p>
+                    <h2>Hydration Level</h2>
+
+                    <div class="level-badge" id="levelIcon">🌱</div>
+                    <h3 id="levelName">Beginner</h3>
+                    <p id="levelMessage">Start your hydration journey!</p>
+
+                    <div class="level-list" id="levelList"></div>
+                </div>
+            </div>
+
+            <!-- QUICK ADD -->
+            <div class="card">
+                <div class="section-heading">
+                    <div>
+                        <p class="eyebrow">RECORD YOUR WATER</p>
+                        <h2>Quick Add Water</h2>
+                    </div>
+                    <span>🥤</span>
+                </div>
+
+                <div class="quick-grid">
+                    <button class="water-btn" data-amount="250" data-container="Glass">
+                        <span>🥛</span>
+                        <strong>+250 mL</strong>
+                        <small>Glass</small>
+                    </button>
+
+                    <button class="water-btn" data-amount="350" data-container="Mug">
+                        <span>☕</span>
+                        <strong>+350 mL</strong>
+                        <small>Mug</small>
+                    </button>
+
+                    <button class="water-btn" data-amount="500" data-container="Bottle">
+                        <span>🧴</span>
+                        <strong>+500 mL</strong>
+                        <small>Bottle</small>
+                    </button>
+
+                    <button class="water-btn" data-amount="750" data-container="Large Bottle">
+                        <span>🚰</span>
+                        <strong>+750 mL</strong>
+                        <small>Large Bottle</small>
+                    </button>
+                </div>
+
+                <div class="custom-water">
+                    <input type="number" id="customAmount"
+                           placeholder="Enter custom amount (mL)" min="1">
+                    <button id="customAddBtn" class="primary-btn">Add Water</button>
+                </div>
+            </div>
+
+            <!-- HYDRATION MESSAGE -->
+            <div class="message-card">
+                <div class="message-icon">💙</div>
+                <div>
+                    <p class="eyebrow">DAILY HYDRATION REMINDER</p>
+                    <h3 id="hydrationMessage">
+                        Water is essential for maintaining normal body functions.
+                    </h3>
+                </div>
+                <button id="nextMessage" class="message-next">↻</button>
+            </div>
+
+            <!-- TIPS -->
+            <div class="card">
+                <p class="eyebrow">HEALTHY HABITS</p>
+                <h2>Hydration Tips</h2>
+                <div id="tipsContainer" class="tips-grid"></div>
+            </div>
+
+            <!-- ACHIEVEMENTS -->
+            <div class="card">
+                <p class="eyebrow">YOUR PROGRESS</p>
+                <h2>Achievements</h2>
+                <div id="achievementContainer" class="achievement-grid"></div>
+            </div>
+
+        </section>
+
+        <!-- WORKDAY -->
+        <section id="workdaySection" class="page-section hidden">
+            <div class="page-heading">
+                <p class="eyebrow">STAY REFRESHED</p>
+                <h1>Workday Hydration</h1>
+                <p>Build a consistent hydration routine throughout your working hours.</p>
+            </div>
+
+            <div class="card">
+                <h2>Suggested Hydration Schedule</h2>
+                <p class="muted">Suggested times, not mandatory drinking targets.</p>
+                <div id="scheduleContainer" class="schedule-list"></div>
+            </div>
+
+            <div class="message-card">
+                <span class="message-icon">⏰</span>
+                <div>
+                    <h3>Remember to take hydration breaks!</h3>
+                    <p>Keep your water bottle nearby while working.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- HISTORY -->
+        <section id="historySection" class="page-section hidden">
+            <div class="page-heading">
+                <p class="eyebrow">YOUR DAILY RECORDS</p>
+                <h1>Water Intake History</h1>
+                <p>Review your recorded water consumption.</p>
+            </div>
+
+            <div class="card">
+                <div class="section-heading">
+                    <h2>Today's Records</h2>
+                    <button id="clearHistory" class="text-btn">Clear History</button>
+                </div>
+
+                <div id="historyContainer"></div>
+            </div>
+        </section>
+
+        <!-- PROFILE -->
+        <section id="profileSection" class="page-section hidden">
+            <div class="page-heading">
+                <p class="eyebrow">PERSONAL SETTINGS</p>
+                <h1>Profile & Settings</h1>
+                <p>Customize your hydration preferences.</p>
+            </div>
+
+            <div class="card profile-card">
+                <div class="profile-avatar">👤</div>
+                <h2 id="profileName">User</h2>
+                <p id="profileEmail" class="muted"></p>
+            </div>
+
+            <div class="card">
+                <h2>Daily Water Goal</h2>
+                <label for="goalInput">Daily goal (mL)</label>
+                <input type="number" id="goalInput" min="1" max="10000">
+                <button id="saveGoal" class="primary-btn">Save Goal</button>
+            </div>
+
+            <div class="card">
+                <h2>Reminder Settings</h2>
+
+                <label for="reminderStart">Workday Start</label>
+                <input type="time" id="reminderStart" value="09:00">
+
+                <label for="reminderEnd">Workday End</label>
+                <input type="time" id="reminderEnd" value="17:00">
+
+                <label for="reminderInterval">Reminder Interval</label>
+                <select id="reminderInterval">
+                    <option value="30">Every 30 minutes</option>
+                    <option value="60">Every 1 hour</option>
+                    <option value="90">Every 1.5 hours</option>
+                    <option value="120">Every 2 hours</option>
+                </select>
+
+                <label class="switch-label">
+                    <input type="checkbox" id="remindersEnabled">
+                    Enable Browser Reminders
+                </label>
+
+                <button id="saveReminders" class="primary-btn">
+                    Save Reminder Settings
+                </button>
+            </div>
+
+            <div class="card">
+                <h2>Measurement Preferences</h2>
+                <label for="unitSelect">Water Measurement</label>
+                <select id="unitSelect">
+                    <option value="ml">Milliliters (mL)</option>
+                    <option value="oz">Fluid Ounces (oz)</option>
+                </select>
+                <button id="saveUnit" class="primary-btn">Save Preference</button>
+            </div>
+
+            <button id="logoutBtn" class="logout-btn">Sign Out</button>
+        </section>
+
+    </main>
+
+    <!-- BOTTOM NAVIGATION -->
+    <nav class="bottom-nav">
+        <button class="nav-btn active" data-page="home">
+            <span>⌂</span>
+            <small>Home</small>
+        </button>
+
+        <button class="nav-btn" data-page="workday">
+            <span>◷</span>
+            <small>Workday</small>
+        </button>
+
+        <button class="nav-btn" data-page="history">
+            <span>▤</span>
+            <small>History</small>
+        </button>
+
+        <button class="nav-btn" data-page="profile">
+            <span>♙</span>
+            <small>Profile</small>
+        </button>
+    </nav>
+
+</div>
+
+<div id="toast" class="toast"></div>
+
+<!-- Firebase-compatible JavaScript module -->
+<script type="module" src="script.js"></script>
+</body>
+</html>
